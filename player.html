@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pie N Mashupz Player</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .player {
+      position: relative;
+      width: 400px;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .player img {
+      width: 100%;
+      display: block;
+    }
+    .player .overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.8) 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 24px;
+    }
+    .player h2 {
+      color: #fff;
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .player p {
+      color: rgba(255,255,255,0.7);
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .play-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #fff;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.1s;
+    }
+    .play-btn:hover { transform: scale(1.05); }
+    .play-btn:active { transform: scale(0.95); }
+    .play-btn svg { width: 20px; height: 20px; margin-left: 3px; }
+    .play-btn.playing svg { margin-left: 0; }
+    .progress-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.3);
+      border-radius: 2px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .progress-bar:hover { height: 6px; }
+    .progress-fill {
+      height: 100%;
+      background: #fff;
+      width: 0%;
+      transition: width 0.1s;
+    }
+    .time {
+      display: flex;
+      justify-content: space-between;
+      color: rgba(255,255,255,0.7);
+      font-size: 11px;
+    }
+    .loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 14px;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .loading.hidden { display: none; }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #ff6b6b;
+      font-size: 14px;
+      text-align: center;
+      padding: 20px;
+    }
+    .error.show { display: flex; }
+  </style>
+</head>
+<body>
+  <div class="player">
+    <img src="cover.jpg" alt="Cover" crossorigin="anonymous">
+    <div class="overlay">
+      <h2>Pie N Mashupz</h2>
+      <p>Base64 Segments Audio</p>
+      <div class="controls">
+        <button class="play-btn" id="playBtn" aria-label="Play">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="progress-container">
+          <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="time"><span id="currentTime">0:00</span><span id="duration">--:--</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <span id="loadingText">Loading segments...</span>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+
+  <script>
+    const segments = [
+      'segments/part_aa.b64',
+      'segments/part_ab.b64',
+      'segments/part_ac.b64',
+      'segments/part_ad.b64',
+      'segments/part_ae.b64',
+      'segments/part_af.b64',
+      'segments/part_ag.b64',
+      'segments/part_ah.b64'
+    ];
+    const baseURL = 'https://joey90nowt.github.io/joe90z/';
+    let audioCtx = null;
+    let audioBuffer = null;
+    let sourceNode = null;
+    let startTime = 0;
+    let pauseOffset = 0;
+    let isPlaying = false;
+    let duration = 0;
+
+    const playBtn = document.getElementById('playBtn');
+    const progressFill = document.getElementById('progressFill');
+    const progressBar = document.getElementById('progressBar');
+    const currentTimeEl = document.getElementById('currentTime');
+    const durationEl = document.getElementById('duration');
+    const loadingEl = document.getElementById('loading');
+    const loadingText = document.getElementById('loadingText');
+    const errorEl = document.getElementById('error');
+
+    function setLoadingText(t) { loadingText.textContent = t; }
+    function showError(msg) { errorEl.textContent = msg; errorEl.classList.add('show'); loadingEl.classList.add('hidden'); }
+    function formatTime(s) { return Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0'); }
+
+    async function loadAudio() {
+      try {
+        setLoadingText('Loading segment 1/8...');
+        let b64 = '';
+        for (let i = 0; i < segments.length; i++) {
+          setLoadingText(`Loading segment ${i+1}/${segments.length}...`);
+          const r = await fetch(baseURL + segments[i]);
+          if (!r.ok) throw new Error(`Failed to load ${segments[i]}`);
+          b64 += await r.text();
+        }
+        setLoadingText('Decoding audio...');
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+        duration = audioBuffer.duration;
+        durationEl.textContent = formatTime(duration);
+        loadingEl.classList.add('hidden');
+      } catch(e) {
+        showError('Failed to load audio: ' + e.message);
+      }
+    }
+
+    function play() {
+      if (!audioBuffer) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      sourceNode = audioCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(audioCtx.destination);
+      sourceNode.onended = () => { if (isPlaying) { isPlaying = false; pauseOffset = 0; updateBtn(); progressFill.style.width = '0%'; currentTimeEl.textContent = '0:00'; } };
+      startTime = audioCtx.currentTime - pauseOffset;
+      sourceNode.start(0, pauseOffset);
+      isPlaying = true;
+    }
+
+    function pause() {
+      if (!sourceNode || !isPlaying) return;
+      pauseOffset = audioCtx.currentTime - startTime;
+      sourceNode.stop();
+      sourceNode.disconnect();
+      sourceNode = null;
+      isPlaying = false;
+    }
+
+    function togglePlay() {
+      if (!audioBuffer) return;
+      if (isPlaying) pause(); else play();
+      updateBtn();
+    }
+
+    function updateBtn() {
+      playBtn.classList.toggle('playing', isPlaying);
+      playBtn.innerHTML = isPlaying
+        ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    }
+
+    function updateProgress() {
+      if (!audioBuffer || !isPlaying) return;
+      const elapsed = audioCtx.currentTime - startTime;
+      pauseOffset = elapsed;
+      progressFill.style.width = (elapsed / duration * 100) + '%';
+      currentTimeEl.textContent = formatTime(elapsed);
+      requestAnimationFrame(updateProgress);
+    }
+
+    playBtn.addEventListener('click', () => { togglePlay(); if (isPlaying) updateProgress(); });
+    progressBar.addEventListener('click', (e) => {
+      if (!audioBuffer) return;
+      const rect = progressBar.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left) / rect.width;
+      pauseOffset = ratio * duration;
+      if (isPlaying) { pause(); play(); }
+      progressFill.style.width = (ratio * 100) + '%';
+      currentTimeEl.textContent = formatTime(pauseOffset);
+    });
+
+    loadAudio();
+  </script>
+</body>
+</html>
