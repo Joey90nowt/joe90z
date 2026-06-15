@@ -21,44 +21,21 @@
       overflow: hidden;
       box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     }
-    .player img {
-      width: 100%;
-      display: block;
-      transition: opacity 0.4s;
-    }
+    .player img { width: 100%; display: block; transition: opacity 0.4s; }
     .player .overlay {
-      position: absolute;
-      inset: 0;
+      position: absolute; inset: 0;
       background: linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.9) 100%);
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      padding: 24px;
+      display: flex; flex-direction: column; justify-content: flex-end; padding: 24px;
     }
-    .chapter-selector {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
+    .chapter-selector { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
     .chapter-btn {
-      padding: 6px 12px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.3);
-      background: transparent;
-      color: rgba(255,255,255,0.7);
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
+      padding: 6px 12px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3);
+      background: transparent; color: rgba(255,255,255,0.7); font-size: 12px;
+      cursor: pointer; transition: all 0.2s;
     }
     .chapter-btn:hover { background: rgba(255,255,255,0.1); }
-    .chapter-btn.active {
-      background: rgba(255,255,255,0.9);
-      color: #111;
-      border-color: rgba(255,255,255,0.9);
-    }
+    .chapter-btn.active { background: rgba(255,255,255,0.9); color: #111; border-color: rgba(255,255,255,0.9); }
     .chapter-btn.played { border-color: rgba(255,255,255,0.5); color: rgba(255,255,255,0.5); }
-    .chapter-btn.played.active { color: #111; }
     .track-info { margin-bottom: 12px; }
     .track-info h2 { color: #fff; font-size: 18px; font-weight: 600; margin-bottom: 4px; }
     .track-info p { color: rgba(255,255,255,0.6); font-size: 13px; }
@@ -102,7 +79,7 @@
 </head>
 <body>
   <div class="player">
-    <img id="coverImg" src="" alt="Cover" crossorigin="anonymous">
+    <img id="coverImg" src="" alt="Cover">
     <div class="overlay">
       <div class="chapter-selector" id="chapterSelector"></div>
       <div class="track-info">
@@ -119,10 +96,7 @@
         </div>
       </div>
     </div>
-    <div class="loading" id="loading">
-      <div class="spinner"></div>
-      <span id="loadingText">Loading chapters...</span>
-    </div>
+    <div class="loading" id="loading"><div class="spinner"></div><span id="loadingText">Loading...</span></div>
     <div class="error" id="error"></div>
   </div>
 
@@ -144,7 +118,12 @@
     let currentChapter = 0;
     let playedChapters = new Set();
     let isPlaying = false;
-    let audio = new Audio();
+    let audioCtx = null;
+    let sourceNode = null;
+    let audioBuffer = null;
+    let startTime = 0;
+    let pauseOffset = 0;
+    let duration = 0;
 
     function setStatus(t) { descText.textContent = t; }
     function showError(msg) { errorEl.textContent = msg; errorEl.classList.add('show'); loadingEl.classList.add('hidden'); }
@@ -152,13 +131,14 @@
 
     async function loadChapters() {
       try {
+        loadingText.textContent = 'Loading chapters...';
         const r = await fetch('chapters.json');
         if (!r.ok) throw new Error('Failed to load chapters.json');
         chapters = await r.json();
         buildChapterSelector();
-        loadChapter(currentChapter);
+        loadChapter(currentChapter, true);
       } catch(e) {
-        showError('Failed to load chapters: ' + e.message);
+        showError('Failed to load: ' + e.message);
       }
     }
 
@@ -184,63 +164,124 @@
       });
     }
 
-    function loadChapter(index) {
-      return new Promise((resolve, reject) => {
+    async function loadChapter(index, preLoad = false) {
+      try {
         const ch = chapters[index];
         titleText.textContent = ch.title;
-        descText.textContent = 'Loading...';
-        audio.src = ch.mp3;
-        audio.preload = 'auto';
+        setStatus('Loading audio...');
+        loadingEl.classList.remove('hidden');
 
-        // Fade cover
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const resp = await fetch(ch.mp3);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const arrayBuffer = await resp.arrayBuffer();
+        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        duration = audioBuffer.duration;
+        durationEl.textContent = formatTime(duration);
+
+        // Swap cover
         coverImg.classList.add('fade-out');
         setTimeout(() => {
           coverImg.src = ch.cover;
           coverImg.onload = () => coverImg.classList.remove('fade-out');
-          if (coverImg.complete && coverImg.naturalHeight !== 0) {
-            coverImg.classList.remove('fade-out');
-          }
-        }, 400);
+          if (coverImg.complete && coverImg.naturalHeight !== 0) coverImg.classList.remove('fade-out');
+        }, 300);
 
-        let settled = false;
-        const settle = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
-        const onMeta = () => settle(resolve);
-        const onErr = () => settle(reject, new Error('Failed to load audio'));
-        const onCan = () => settle(resolve);
+        loadingEl.classList.add('hidden');
+        setStatus(preLoad ? 'Ready' : 'Loaded');
 
-        audio.addEventListener('loadedmetadata', onMeta, { once: true });
-        audio.addEventListener('canplay', onCan, { once: true });
-        audio.addEventListener('error', onErr, { once: true });
-
-        // Fallback timeout
-        setTimeout(() => settle(resolve), 5000);
-      });
+        if (preLoad) {
+          loadingEl.classList.add('hidden');
+        }
+      } catch(e) {
+        showError('Failed to load audio: ' + e.message);
+      }
     }
 
-    async function playChapter(index) {
-      currentChapter = index;
-      updateChapterButtons();
-      loadingEl.classList.remove('hidden');
+    function startPlayback() {
+      if (!audioBuffer) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      stopPlayback();
 
-      try {
-        await loadChapter(index);
-        audio.play();
-        isPlaying = true;
-        loadingEl.classList.add('hidden');
+      sourceNode = audioCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(audioCtx.destination);
+      sourceNode.onended = () => {
+        if (isPlaying) onTrackEnded();
+      };
+      startTime = audioCtx.currentTime - pauseOffset;
+      sourceNode.start(0, pauseOffset);
+      isPlaying = true;
+      updateBtn();
+      trackProgress();
+    }
+
+    function stopPlayback() {
+      if (sourceNode) {
+        try { sourceNode.stop(); } catch(e) {}
+        sourceNode.disconnect();
+        sourceNode = null;
+      }
+    }
+
+    function trackProgress() {
+      if (!isPlaying) return;
+      const elapsed = audioCtx.currentTime - startTime;
+      if (elapsed >= duration) {
+        onTrackEnded();
+        return;
+      }
+      pauseOffset = elapsed;
+      progressFill.style.width = (elapsed / duration * 100) + '%';
+      currentTimeEl.textContent = formatTime(elapsed);
+      requestAnimationFrame(trackProgress);
+    }
+
+    function onTrackEnded() {
+      stopPlayback();
+      isPlaying = false;
+      pauseOffset = 0;
+      playedChapters.add(currentChapter);
+      updateChapterButtons();
+      progressFill.style.width = '0%';
+      currentTimeEl.textContent = '0:00';
+
+      if (currentChapter < chapters.length - 1) {
+        currentChapter++;
+        playChapter(currentChapter);
+      } else {
         updateBtn();
+        setStatus('All chapters finished');
+      }
+    }
+
+    function playChapter(index) {
+      if (index !== currentChapter || !audioBuffer) {
+        currentChapter = index;
+        updateChapterButtons();
+        loadChapter(index).then(() => {
+          pauseOffset = 0;
+          startPlayback();
+          setStatus('Playing');
+        });
+      } else {
+        pauseOffset = 0;
+        startPlayback();
         setStatus('Playing');
-      } catch(e) {
-        showError(e.message);
       }
     }
 
     function togglePlay() {
+      if (!audioBuffer) return;
       if (isPlaying) {
-        audio.pause();
+        pauseOffset = audioCtx.currentTime - startTime;
+        stopPlayback();
         isPlaying = false;
         setStatus('Paused');
       } else {
-        playChapter(currentChapter);
+        startPlayback();
+        setStatus('Playing');
       }
       updateBtn();
     }
@@ -252,47 +293,22 @@
         : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
     }
 
-    audio.addEventListener('timeupdate', () => {
-      if (!audio.duration) return;
-      const pct = (audio.currentTime / audio.duration) * 100;
-      progressFill.style.width = pct + '%';
-      currentTimeEl.textContent = formatTime(audio.currentTime);
-    });
-
-    audio.addEventListener('ended', () => {
-      playedChapters.add(currentChapter);
-      updateChapterButtons();
-
-      if (currentChapter < chapters.length - 1) {
-        currentChapter++;
-        playChapter(currentChapter);
-      } else {
-        isPlaying = false;
-        updateBtn();
-        progressFill.style.width = '0%';
-        currentTimeEl.textContent = '0:00';
-        setStatus('All chapters finished');
-      }
-    });
-
-    audio.addEventListener('waiting', () => setStatus('Buffering...'));
-    audio.addEventListener('playing', () => setStatus('Playing'));
-
-    audio.addEventListener('loadedmetadata', () => {
-      durationEl.textContent = formatTime(audio.duration);
-    });
-
-    audio.addEventListener('error', () => {
-      showError('Audio error. Check console.');
-    });
-
     playBtn.addEventListener('click', togglePlay);
 
     progressBar.addEventListener('click', (e) => {
-      if (!audio.duration) return;
+      if (!audioBuffer) return;
       const rect = progressBar.getBoundingClientRect();
       const ratio = (e.clientX - rect.left) / rect.width;
-      audio.currentTime = ratio * audio.duration;
+      const targetTime = ratio * duration;
+      if (isPlaying) {
+        pauseOffset = targetTime;
+        stopPlayback();
+        startPlayback();
+      } else {
+        pauseOffset = targetTime;
+      }
+      progressFill.style.width = (ratio * 100) + '%';
+      currentTimeEl.textContent = formatTime(targetTime);
     });
 
     loadChapters();
