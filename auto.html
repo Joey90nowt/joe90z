@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pie N Mashupz - Auto Player</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .player {
+      position: relative;
+      width: 400px;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .player img {
+      width: 100%;
+      display: block;
+      transition: opacity 0.4s;
+    }
+    .player .overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.85) 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 24px;
+    }
+    .player h2 { color: #fff; font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .player p { color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 16px; }
+    .controls { display: flex; align-items: center; gap: 12px; }
+    .play-btn {
+      width: 48px; height: 48px; border-radius: 50%; background: #fff; border: none;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: transform 0.1s; flex-shrink: 0;
+    }
+    .play-btn:hover { transform: scale(1.05); }
+    .play-btn:active { transform: scale(0.95); }
+    .play-btn svg { width: 20px; height: 20px; }
+    .play-btn.playing svg { margin-left: 0; }
+    .progress-container { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .progress-bar {
+      width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px;
+      overflow: hidden; cursor: pointer; transition: height 0.1s;
+    }
+    .progress-bar:hover { height: 7px; }
+    .progress-fill { height: 100%; background: #fff; width: 0%; will-change: width; }
+    .time { display: flex; justify-content: space-between; color: rgba(255,255,255,0.7); font-size: 11px; }
+    .track-indicator {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .track-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+      transition: background 0.3s, transform 0.3s;
+    }
+    .track-dot.active {
+      background: #fff;
+      transform: scale(1.3);
+    }
+    .track-dot.done {
+      background: rgba(255,255,255,0.6);
+    }
+    .loading {
+      position: absolute; inset: 0; background: rgba(0,0,0,0.85);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #fff; font-size: 14px; gap: 12px;
+    }
+    .loading.hidden { opacity: 0; pointer-events: none; display: none; }
+    .spinner {
+      width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error {
+      position: absolute; inset: 0; background: rgba(0,0,0,0.9);
+      display: none; align-items: center; justify-content: center;
+      color: #ff6b6b; font-size: 14px; text-align: center; padding: 20px;
+    }
+    .error.show { display: flex; }
+    .fade-out { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div class="player">
+    <img id="coverImg" src="cover.jpg" alt="Cover" crossorigin="anonymous">
+    <div class="overlay">
+      <div class="track-indicator" id="trackIndicator"></div>
+      <h2 id="titleText">Pie N Mashupz</h2>
+      <p id="statusText">Ready to play</p>
+      <div class="controls">
+        <button class="play-btn" id="playBtn" aria-label="Play">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="progress-container">
+          <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="time"><span id="currentTime">0:00</span><span id="duration">--:--</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <span id="loadingText">Loading...</span>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+
+  <script>
+    const tracks = [
+      {
+        mp3: 'https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/hi26ik_restored.mp3',
+        cover: 'cover.jpg',
+        title: 'Track 1'
+      },
+      {
+        mp3: 'https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_restored.mp3',
+        cover: 'cover2.jpg',
+        title: 'Track 2'
+      }
+    ];
+
+    const playBtn = document.getElementById('playBtn');
+    const progressFill = document.getElementById('progressFill');
+    const progressBar = document.getElementById('progressBar');
+    const currentTimeEl = document.getElementById('currentTime');
+    const durationEl = document.getElementById('duration');
+    const loadingEl = document.getElementById('loading');
+    const loadingText = document.getElementById('loadingText');
+    const errorEl = document.getElementById('error');
+    const statusText = document.getElementById('statusText');
+    const titleText = document.getElementById('titleText');
+    const coverImg = document.getElementById('coverImg');
+    const trackIndicator = document.getElementById('trackIndicator');
+
+    let currentTrack = 0;
+    let isPlaying = false;
+    let audio = new Audio();
+
+    // Build track dots
+    tracks.forEach((_, i) => {
+      const d = document.createElement('div');
+      d.className = 'track-dot' + (i === 0 ? ' active' : '');
+      d.id = 'dot' + i;
+      trackIndicator.appendChild(d);
+    });
+
+    function setStatus(t) { statusText.textContent = t; }
+    function showError(msg) { errorEl.textContent = msg; errorEl.classList.add('show'); loadingEl.classList.add('hidden'); }
+    function formatTime(s) { return Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0'); }
+
+    function updateDots() {
+      tracks.forEach((_, i) => {
+        const dot = document.getElementById('dot' + i);
+        dot.className = 'track-dot' + (i === currentTrack ? ' active' : i < currentTrack ? ' done' : '');
+      });
+    }
+
+    function loadTrack(index) {
+      return new Promise((resolve, reject) => {
+        audio.src = tracks[index].mp3;
+        audio.preload = 'auto';
+        loadingEl.classList.remove('hidden');
+        setStatus('Loading track ' + (index + 1) + '...');
+
+        const onLoaded = () => {
+          audio.removeEventListener('loadedmetadata', onLoaded);
+          audio.removeEventListener('error', onError);
+          resolve();
+        };
+        const onError = () => {
+          audio.removeEventListener('loadedmetadata', onLoaded);
+          audio.removeEventListener('error', onError);
+          reject(new Error('Failed to load track ' + (index + 1)));
+        };
+
+        audio.addEventListener('loadedmetadata', onLoaded);
+        audio.addEventListener('error', onError);
+      });
+    }
+
+    function switchTrack(index) {
+      if (index === currentTrack && audio.src) return;
+      currentTrack = index;
+      titleText.textContent = tracks[index].title;
+      updateDots();
+
+      // Fade out cover
+      coverImg.classList.add('fade-out');
+
+      setTimeout(() => {
+        coverImg.src = tracks[index].cover;
+        coverImg.onload = () => coverImg.classList.remove('fade-out');
+        // If image already cached
+        if (coverImg.complete && coverImg.naturalHeight !== 0) {
+          coverImg.classList.remove('fade-out');
+        }
+      }, 400);
+    }
+
+    async function playTrack(index) {
+      if (index !== currentTrack) {
+        await loadTrack(index);
+        switchTrack(index);
+      }
+      audio.play();
+      isPlaying = true;
+      updateBtn();
+      loadingEl.classList.add('hidden');
+      setStatus('Playing track ' + (index + 1));
+    }
+
+    function togglePlay() {
+      if (isPlaying) { audio.pause(); isPlaying = false; setStatus('Paused'); }
+      else { playTrack(currentTrack); }
+      updateBtn();
+    }
+
+    function updateBtn() {
+      playBtn.classList.toggle('playing', isPlaying);
+      playBtn.innerHTML = isPlaying
+        ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    }
+
+    audio.addEventListener('timeupdate', () => {
+      const pct = (audio.currentTime / audio.duration) * 100;
+      progressFill.style.width = pct + '%';
+      currentTimeEl.textContent = formatTime(audio.currentTime);
+    });
+
+    audio.addEventListener('ended', () => {
+      if (currentTrack < tracks.length - 1) {
+        currentTrack++;
+        playTrack(currentTrack);
+      } else {
+        isPlaying = false;
+        updateBtn();
+        progressFill.style.width = '0%';
+        currentTimeEl.textContent = '0:00';
+        setStatus('All tracks finished');
+      }
+    });
+
+    audio.addEventListener('waiting', () => setStatus('Buffering...'));
+    audio.addEventListener('playing', () => setStatus('Playing track ' + (currentTrack + 1)));
+
+    audio.addEventListener('loadedmetadata', () => {
+      durationEl.textContent = formatTime(audio.duration);
+      loadingEl.classList.add('hidden');
+    });
+
+    audio.addEventListener('error', () => {
+      showError('Failed to load audio.');
+    });
+
+    playBtn.addEventListener('click', togglePlay);
+
+    progressBar.addEventListener('click', (e) => {
+      if (!audio.duration) return;
+      const rect = progressBar.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left) / rect.width;
+      audio.currentTime = ratio * audio.duration;
+    });
+
+    // Preload first track
+    loadTrack(0);
+  </script>
+</body>
+</html>
