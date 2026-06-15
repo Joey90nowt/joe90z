@@ -168,27 +168,26 @@
       try {
         const ch = chapters[index];
         titleText.textContent = ch.title;
-        setStatus('Loading audio...');
+        setStatus('Loading...');
         loadingEl.classList.remove('hidden');
+
+        // Load cover immediately
+        coverImg.src = ch.cover;
 
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
+        setStatus('Fetching audio...');
         const resp = await fetch(ch.mp3);
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+        setStatus('Decoding audio...');
         const arrayBuffer = await resp.arrayBuffer();
         audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
         duration = audioBuffer.duration;
         durationEl.textContent = formatTime(duration);
 
-        // Swap cover immediately
-        coverImg.src = ch.cover;
-
         loadingEl.classList.add('hidden');
         setStatus(preLoad ? 'Ready' : 'Loaded');
-
-        if (preLoad) {
-          loadingEl.classList.add('hidden');
-        }
       } catch(e) {
         showError('Failed to load audio: ' + e.message);
       }
