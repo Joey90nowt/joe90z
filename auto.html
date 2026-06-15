@@ -8,20 +8,15 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       background: #111;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     .player {
-      position: relative;
-      width: 400px;
-      border-radius: 16px;
-      overflow: hidden;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      position: relative; width: 400px; border-radius: 16px;
+      overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     }
-    .player img { width: 100%; display: block; transition: opacity 0.4s; }
+    .player img { width: 100%; display: block; }
     .player .overlay {
       position: absolute; inset: 0;
       background: linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.9) 100%);
@@ -57,6 +52,13 @@
     .progress-bar:hover { height: 7px; }
     .progress-fill { height: 100%; background: #fff; width: 0%; will-change: width; }
     .time { display: flex; justify-content: space-between; color: rgba(255,255,255,0.6); font-size: 11px; }
+    .seg-bar {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+      background: rgba(255,255,255,0.15); display: flex; gap: 1px; padding: 0 24px;
+    }
+    .seg-bar .seg { flex: 1; height: 100%; background: rgba(255,255,255,0.2); transition: background 0.3s; }
+    .seg-bar .seg.loaded { background: rgba(255,255,255,0.7); }
+    .seg-bar .seg.played { background: #4caf50; }
     .loading {
       position: absolute; inset: 0; background: rgba(0,0,0,0.9);
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -74,7 +76,6 @@
       color: #ff6b6b; font-size: 14px; text-align: center; padding: 20px;
     }
     .error.show { display: flex; }
-    .fade-out { opacity: 0; }
   </style>
 </head>
 <body>
@@ -96,6 +97,7 @@
         </div>
       </div>
     </div>
+    <div class="seg-bar" id="segBar"></div>
     <div class="loading" id="loading"><div class="spinner"></div><span id="loadingText">Loading...</span></div>
     <div class="error" id="error"></div>
   </div>
@@ -113,6 +115,7 @@
     const descText = document.getElementById('descText');
     const coverImg = document.getElementById('coverImg');
     const chapterSelector = document.getElementById('chapterSelector');
+    const segBar = document.getElementById('segBar');
 
     let chapters = [];
     let currentChapter = 0;
@@ -120,10 +123,13 @@
     let isPlaying = false;
     let audioCtx = null;
     let sourceNode = null;
-    let audioBuffer = null;
+    let buffers = [];
+    let totalLength = 0;
+    let totalDuration = 0;
     let startTime = 0;
     let pauseOffset = 0;
-    let duration = 0;
+    let segLoaded = [];
+    let loadStarted = false;
 
     function setStatus(t) { descText.textContent = t; }
     function showError(msg) { errorEl.textContent = msg; errorEl.classList.add('show'); loadingEl.classList.add('hidden'); }
@@ -136,6 +142,7 @@
         if (!r.ok) throw new Error('Failed to load chapters.json');
         chapters = await r.json();
         buildChapterSelector();
+        buildSegBar(currentChapter);
         loadChapter(currentChapter, true);
       } catch(e) {
         showError('Failed to load: ' + e.message);
@@ -154,6 +161,18 @@
       });
     }
 
+    function buildSegBar(chIndex) {
+      segBar.innerHTML = '';
+      const segs = chapters[chIndex].segments;
+      segLoaded = new Array(segs.length).fill(false);
+      segs.forEach((_, i) => {
+        const d = document.createElement('div');
+        d.className = 'seg';
+        d.id = 'seg' + i;
+        segBar.appendChild(d);
+      });
+    }
+
     function updateChapterButtons() {
       chapters.forEach((ch, i) => {
         const btn = document.getElementById('chbtn' + i);
@@ -164,48 +183,99 @@
       });
     }
 
+    function markSegLoaded(i) {
+      segLoaded[i] = true;
+      const el = document.getElementById('seg' + i);
+      if (el) el.classList.add('loaded');
+    }
+
+    function markSegPlayed(i) {
+      const el = document.getElementById('seg' + i);
+      if (el) el.classList.add('played');
+    }
+
+    async function loadSegment(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return await resp.arrayBuffer();
+    }
+
     async function loadChapter(index, preLoad = false) {
       try {
+        loadStarted = false;
+        buffers = [];
+        totalLength = 0;
+        totalDuration = 0;
+        buildSegBar(index);
+
         const ch = chapters[index];
         titleText.textContent = ch.title;
+        coverImg.src = ch.cover;
         setStatus('Loading...');
         loadingEl.classList.remove('hidden');
 
-        // Load cover immediately
-        coverImg.src = ch.cover;
-
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-        setStatus('Fetching audio...');
-        const resp = await fetch(ch.mp3);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-        setStatus('Decoding audio...');
-        const arrayBuffer = await resp.arrayBuffer();
-        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        duration = audioBuffer.duration;
-        durationEl.textContent = formatTime(duration);
-
+        // Load first segment and decode immediately
+        setStatus('Loading segment 1/' + ch.segments.length + '...');
+        const firstBuf = await loadSegment(ch.segments[0]);
+        const firstDecoded = await audioCtx.decodeAudioData(firstBuf);
+        buffers.push(firstDecoded);
+        totalLength += firstDecoded.length;
+        totalDuration += firstDecoded.duration;
+        markSegLoaded(0);
         loadingEl.classList.add('hidden');
-        setStatus(preLoad ? 'Ready' : 'Loaded');
+        setStatus('Ready');
+
+        // Load remaining segments in background
+        loadStarted = true;
+        for (let i = 1; i < ch.segments.length; i++) {
+          try {
+            setStatus('Buffering ' + (i + 1) + '/' + ch.segments.length + '...');
+            const buf = await loadSegment(ch.segments[i]);
+            const decoded = await audioCtx.decodeAudioData(buf);
+            buffers.push(decoded);
+            totalLength += decoded.length;
+            totalDuration += decoded.duration;
+            markSegLoaded(i);
+            setStatus((i + 1) + '/' + ch.segments.length + ' buffered');
+          } catch(e) {
+            showError('Failed to load segment ' + (i + 1));
+            return;
+          }
+        }
+        setStatus('Fully buffered');
+        durationEl.textContent = formatTime(totalDuration);
       } catch(e) {
-        showError('Failed to load audio: ' + e.message);
+        showError('Failed: ' + e.message);
       }
     }
 
     function startPlayback() {
-      if (!audioBuffer) return;
+      if (!buffers.length) return;
       if (audioCtx.state === 'suspended') audioCtx.resume();
       stopPlayback();
 
+      // Concatenate all buffers
+      const combined = audioCtx.createBuffer(
+        buffers[0].numberOfChannels,
+        totalLength,
+        buffers[0].sampleRate
+      );
+      let offset = 0;
+      buffers.forEach(buf => {
+        for (let c = 0; c < buf.numberOfChannels; c++) {
+          combined.getChannelData(c).set(buf.getChannelData(c), offset);
+        }
+        offset += buf.length;
+      });
+
       sourceNode = audioCtx.createBufferSource();
-      sourceNode.buffer = audioBuffer;
+      sourceNode.buffer = combined;
       sourceNode.connect(audioCtx.destination);
-      sourceNode.onended = () => {
-        if (isPlaying) onTrackEnded();
-      };
-      startTime = audioCtx.currentTime - pauseOffset;
+      sourceNode.onended = () => { if (isPlaying) onTrackEnded(); };
       sourceNode.start(0, pauseOffset);
+      startTime = audioCtx.currentTime - pauseOffset;
       isPlaying = true;
       updateBtn();
       trackProgress();
@@ -222,12 +292,12 @@
     function trackProgress() {
       if (!isPlaying) return;
       const elapsed = audioCtx.currentTime - startTime;
-      if (elapsed >= duration) {
+      if (elapsed >= totalDuration || elapsed < 0) {
         onTrackEnded();
         return;
       }
       pauseOffset = elapsed;
-      progressFill.style.width = (elapsed / duration * 100) + '%';
+      progressFill.style.width = (elapsed / totalDuration * 100) + '%';
       currentTimeEl.textContent = formatTime(elapsed);
       requestAnimationFrame(trackProgress);
     }
@@ -240,6 +310,7 @@
       updateChapterButtons();
       progressFill.style.width = '0%';
       currentTimeEl.textContent = '0:00';
+      durationEl.textContent = formatTime(totalDuration);
 
       if (currentChapter < chapters.length - 1) {
         currentChapter++;
@@ -251,23 +322,21 @@
     }
 
     function playChapter(index) {
-      if (index !== currentChapter || !audioBuffer) {
-        currentChapter = index;
-        updateChapterButtons();
-        loadChapter(index).then(() => {
-          pauseOffset = 0;
+      currentChapter = index;
+      updateChapterButtons();
+      pauseOffset = 0;
+      progressFill.style.width = '0%';
+      currentTimeEl.textContent = '0:00';
+      loadChapter(index).then(() => {
+        if (!isPlaying) {
           startPlayback();
           setStatus('Playing');
-        });
-      } else {
-        pauseOffset = 0;
-        startPlayback();
-        setStatus('Playing');
-      }
+        }
+      });
     }
 
     function togglePlay() {
-      if (!audioBuffer) return;
+      if (!buffers.length) return;
       if (isPlaying) {
         pauseOffset = audioCtx.currentTime - startTime;
         stopPlayback();
@@ -290,16 +359,14 @@
     playBtn.addEventListener('click', togglePlay);
 
     progressBar.addEventListener('click', (e) => {
-      if (!audioBuffer) return;
+      if (!buffers.length || !totalDuration) return;
       const rect = progressBar.getBoundingClientRect();
       const ratio = (e.clientX - rect.left) / rect.width;
-      const targetTime = ratio * duration;
+      const targetTime = ratio * totalDuration;
+      pauseOffset = targetTime;
       if (isPlaying) {
-        pauseOffset = targetTime;
         stopPlayback();
         startPlayback();
-      } else {
-        pauseOffset = targetTime;
       }
       progressFill.style.width = (ratio * 100) + '%';
       currentTimeEl.textContent = formatTime(targetTime);

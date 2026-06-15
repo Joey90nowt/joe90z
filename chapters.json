@@ -2,15 +2,33 @@
   {
     "id": 1,
     "title": "Chapter 1",
-    "mp3": "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_restored.mp3",
+    "segments": [
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_aa",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_ab",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_ac",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_ad",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_ae",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_af",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_ag",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/segments/part_ah"
+    ],
     "cover": "https://joey90nowt.github.io/joe90z/cover.jpg",
-    "description": "First chapter"
+    "description": "Chapter 1"
   },
   {
     "id": 2,
     "title": "Chapter 2",
-    "mp3": "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/hi26ik_restored.mp3",
+    "segments": [
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_aa",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_ab",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_ac",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_ad",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_ae",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_af",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_ag",
+      "https://media.githubusercontent.com/media/Joey90nowt/joe90z/master/ivy5ya_segments/part_ah"
+    ],
     "cover": "https://joey90nowt.github.io/joe90z/cover2.jpg",
-    "description": "Second chapter"
+    "description": "Chapter 2"
   }
 ]
