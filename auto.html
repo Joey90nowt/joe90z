@@ -202,18 +202,18 @@
           }
         }, 400);
 
-        const onMeta = () => {
-          audio.removeEventListener('loadedmetadata', onMeta);
-          audio.removeEventListener('error', onErr);
-          resolve();
-        };
-        const onErr = () => {
-          audio.removeEventListener('loadedmetadata', onMeta);
-          audio.removeEventListener('error', onErr);
-          reject(new Error('Failed to load audio'));
-        };
-        audio.addEventListener('loadedmetadata', onMeta);
-        audio.addEventListener('error', onErr);
+        let settled = false;
+        const settle = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+        const onMeta = () => settle(resolve);
+        const onErr = () => settle(reject, new Error('Failed to load audio'));
+        const onCan = () => settle(resolve);
+
+        audio.addEventListener('loadedmetadata', onMeta, { once: true });
+        audio.addEventListener('canplay', onCan, { once: true });
+        audio.addEventListener('error', onErr, { once: true });
+
+        // Fallback timeout
+        setTimeout(() => settle(resolve), 5000);
       });
     }
 
