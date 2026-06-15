@@ -180,13 +180,8 @@
         duration = audioBuffer.duration;
         durationEl.textContent = formatTime(duration);
 
-        // Swap cover
-        coverImg.classList.add('fade-out');
-        setTimeout(() => {
-          coverImg.src = ch.cover;
-          coverImg.onload = () => coverImg.classList.remove('fade-out');
-          if (coverImg.complete && coverImg.naturalHeight !== 0) coverImg.classList.remove('fade-out');
-        }, 300);
+        // Swap cover immediately
+        coverImg.src = ch.cover;
 
         loadingEl.classList.add('hidden');
         setStatus(preLoad ? 'Ready' : 'Loaded');
