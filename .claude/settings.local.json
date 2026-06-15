@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p segments)",
+      "Bash(rm -f segments/*)",
+      "Bash(split -b 20M hi26ik.mp3 segments/part_)"
+    ]
+  }
+}
