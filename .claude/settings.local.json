@@ -3,7 +3,10 @@
     "allow": [
       "Bash(mkdir -p segments)",
       "Bash(rm -f segments/*)",
-      "Bash(split -b 20M hi26ik.mp3 segments/part_)"
+      "Bash(split -b 20M hi26ik.mp3 segments/part_)",
+      "Bash(rm -f /root/j/segments/* /root/j/ivy5ya_segments/*)",
+      "Bash(split -b 2M /root/j/hi26ik_restored.mp3 /root/j/segments/part_)",
+      "Bash(split -b 2M /root/j/ivy5ya_restored.mp3 /root/j/ivy5ya_segments/part_)"
     ]
   }
 }
