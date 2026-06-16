@@ -129,7 +129,14 @@
     let startTime = 0;
     let pauseOffset = 0;
     let segLoaded = [];
+    let loadQueue = [];
+    let onDecodedCallbacks = [];
+    let loadedCount = 0;
+    let segmentDurations = [];
+    let segmentOffsets = [];
     let loadStarted = false;
+    let playingFromBuffer = false;
+    let pendingPlay = false;
 
     function setStatus(t) { descText.textContent = t; }
     function showError(msg) { errorEl.textContent = msg; errorEl.classList.add('show'); loadingEl.classList.add('hidden'); }
@@ -143,7 +150,7 @@
         chapters = await r.json();
         buildChapterSelector();
         buildSegBar(currentChapter);
-        loadChapter(currentChapter, true);
+        loadChapter(currentChapter);
       } catch(e) {
         showError('Failed to load: ' + e.message);
       }
@@ -165,6 +172,7 @@
       segBar.innerHTML = '';
       const segs = chapters[chIndex].segments;
       segLoaded = new Array(segs.length).fill(false);
+      loadedCount = 0;
       segs.forEach((_, i) => {
         const d = document.createElement('div');
         d.className = 'seg';
@@ -184,28 +192,37 @@
     }
 
     function markSegLoaded(i) {
+      if (segLoaded[i]) return;
       segLoaded[i] = true;
+      loadedCount++;
       const el = document.getElementById('seg' + i);
       if (el) el.classList.add('loaded');
     }
 
-    function markSegPlayed(i) {
-      const el = document.getElementById('seg' + i);
-      if (el) el.classList.add('played');
-    }
-
-    async function loadSegment(url) {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      return await resp.arrayBuffer();
-    }
-
-    async function loadChapter(index, preLoad = false) {
+    async function loadAndDecodeSegment(url, index) {
       try {
-        loadStarted = false;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const arrayBuffer = await resp.arrayBuffer();
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+        markSegLoaded(index);
+        return decoded;
+      } catch(e) {
+        showError('Failed to load segment ' + (index + 1) + ': ' + e.message);
+        return null;
+      }
+    }
+
+    async function loadChapter(index) {
+      try {
         buffers = [];
         totalLength = 0;
         totalDuration = 0;
+        segmentDurations = [];
+        segmentOffsets = [];
+        loadStarted = true;
+        loadQueue = [];
         buildSegBar(index);
 
         const ch = chapters[index];
@@ -216,36 +233,44 @@
 
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-        // Load first segment and decode immediately
-        setStatus('Loading segment 1/' + ch.segments.length + '...');
-        const firstBuf = await loadSegment(ch.segments[0]);
-        const firstDecoded = await audioCtx.decodeAudioData(firstBuf);
+        // Load first segment and start playing immediately
+        setStatus('Loading first segment...');
+        const firstDecoded = await loadAndDecodeSegment(ch.segments[0], 0);
+        if (!firstDecoded) return;
+
         buffers.push(firstDecoded);
+        segmentDurations.push(firstDecoded.duration);
+        segmentOffsets.push(totalLength);
         totalLength += firstDecoded.length;
         totalDuration += firstDecoded.duration;
-        markSegLoaded(0);
-        loadingEl.classList.add('hidden');
-        setStatus('Ready');
+        durationEl.textContent = formatTime(totalDuration);
 
-        // Load remaining segments in background
-        loadStarted = true;
+        loadingEl.classList.add('hidden');
+
+        // Start playing from first segment
+        startPlayback();
+
+        // Load remaining segments in background, parallelized
         for (let i = 1; i < ch.segments.length; i++) {
-          try {
-            setStatus('Buffering ' + (i + 1) + '/' + ch.segments.length + '...');
-            const buf = await loadSegment(ch.segments[i]);
-            const decoded = await audioCtx.decodeAudioData(buf);
-            buffers.push(decoded);
-            totalLength += decoded.length;
-            totalDuration += decoded.duration;
-            markSegLoaded(i);
-            setStatus((i + 1) + '/' + ch.segments.length + ' buffered');
-          } catch(e) {
-            showError('Failed to load segment ' + (i + 1));
-            return;
+          loadQueue.push(loadAndDecodeSegment(ch.segments[i], i));
+        }
+
+        // Process all loads in parallel
+        const results = await Promise.all(loadQueue);
+
+        // Add decoded buffers to our timeline
+        for (let i = 1; i < results.length; i++) {
+          if (results[i]) {
+            buffers.push(results[i]);
+            segmentDurations.push(results[i].duration);
+            segmentOffsets.push(totalLength);
+            totalLength += results[i].length;
+            totalDuration += results[i].duration;
+            durationEl.textContent = formatTime(totalDuration);
           }
         }
-        setStatus('Fully buffered');
-        durationEl.textContent = formatTime(totalDuration);
+
+        setStatus('Fully buffered (' + loadedCount + ' segments)');
       } catch(e) {
         showError('Failed: ' + e.message);
       }
@@ -256,7 +281,7 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
       stopPlayback();
 
-      // Concatenate all buffers
+      // Build combined buffer
       const combined = audioCtx.createBuffer(
         buffers[0].numberOfChannels,
         totalLength,
@@ -277,6 +302,7 @@
       sourceNode.start(0, pauseOffset);
       startTime = audioCtx.currentTime - pauseOffset;
       isPlaying = true;
+      playingFromBuffer = true;
       updateBtn();
       trackProgress();
     }
@@ -322,21 +348,25 @@
     }
 
     function playChapter(index) {
-      currentChapter = index;
-      updateChapterButtons();
-      pauseOffset = 0;
-      progressFill.style.width = '0%';
-      currentTimeEl.textContent = '0:00';
-      loadChapter(index).then(() => {
-        if (!isPlaying) {
-          startPlayback();
-          setStatus('Playing');
-        }
-      });
+      if (!loadStarted || index !== currentChapter) {
+        currentChapter = index;
+        updateChapterButtons();
+        pauseOffset = 0;
+        progressFill.style.width = '0%';
+        currentTimeEl.textContent = '0:00';
+        loadStarted = false;
+        loadChapter(index);
+      } else {
+        pauseOffset = 0;
+        progressFill.style.width = '0%';
+        currentTimeEl.textContent = '0:00';
+        startPlayback();
+        setStatus('Playing');
+      }
     }
 
     function togglePlay() {
-      if (!buffers.length) return;
+      if (!buffers.length || !loadStarted) return;
       if (isPlaying) {
         pauseOffset = audioCtx.currentTime - startTime;
         stopPlayback();
